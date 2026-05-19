@@ -154,7 +154,7 @@ npm run dev
 
 ## 📸 Screenshots
 
-![Chat UI](screenshots/image1.png)
+![Chat UI](screenshots/image.png)
 ![Image Messages](screenshots/image.png)
 ![Mobile Responsive](screenshots/mobile-layout.png)
 
