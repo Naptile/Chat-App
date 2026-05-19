@@ -9,17 +9,17 @@ export default function Chat() {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [typingUser, setTypingUser] = useState(null);
+  const [unread, setUnread] = useState({});
+  const [lastMessages, setLastMessages] = useState({});
 
   const messagesEndRef = useRef(null);
-
   const token = localStorage.getItem("token");
 
-  // 🔥 Decode current user ID from token
   const currentUserId = token
     ? JSON.parse(atob(token.split(".")[1])).id
     : null;
 
-  // CONNECT SOCKET
+  // ✅ SOCKET CONNECTION
   useEffect(() => {
     const newSocket = io(import.meta.env.VITE_API_URL, {
       auth: { token },
@@ -28,7 +28,24 @@ export default function Chat() {
     setSocket(newSocket);
 
     newSocket.on("receiveMessage", (msg) => {
-      setMessages((prev) => [...prev, msg]);
+      const senderId = msg.sender?._id || msg.sender;
+
+      // ✅ update last message
+      setLastMessages((prev) => ({
+        ...prev,
+        [senderId]: msg.text,
+      }));
+
+      // ✅ if chat open → show message
+      if (selectedUser && senderId === selectedUser._id) {
+        setMessages((prev) => [...prev, msg]);
+      } else {
+        // 🔴 unread
+        setUnread((prev) => ({
+          ...prev,
+          [senderId]: (prev[senderId] || 0) + 1,
+        }));
+      }
     });
 
     newSocket.on("onlineUsers", (users) => {
@@ -44,9 +61,9 @@ export default function Chat() {
     });
 
     return () => newSocket.disconnect();
-  }, []);
+  }, [selectedUser]);
 
-  // FETCH USERS
+  // ✅ FETCH USERS
   useEffect(() => {
     fetch(`${import.meta.env.VITE_API_URL}/api/users`, {
       headers: {
@@ -60,7 +77,7 @@ export default function Chat() {
       });
   }, []);
 
-  // LOAD MESSAGES
+  // ✅ LOAD CHAT HISTORY
   useEffect(() => {
     if (!selectedUser) return;
 
@@ -76,12 +93,12 @@ export default function Chat() {
       });
   }, [selectedUser]);
 
-  // AUTO SCROLL
+  // ✅ AUTO SCROLL
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // SEND MESSAGE
+  // ✅ SEND MESSAGE
   const sendMessage = () => {
     if (!message.trim() || !selectedUser) return;
 
@@ -91,7 +108,7 @@ export default function Chat() {
     setMessage("");
   };
 
-  // TYPING
+  // ✅ TYPING
   const handleTyping = (e) => {
     setMessage(e.target.value);
 
@@ -106,7 +123,7 @@ export default function Chat() {
 
   return (
     <div className="flex h-screen bg-gray-100">
-      
+
       {/* USERS */}
       <div className="w-1/4 bg-white border-r p-4">
         <h2 className="text-xl font-bold mb-4">Users</h2>
@@ -114,18 +131,40 @@ export default function Chat() {
         {users.map((user) => (
           <div
             key={user._id}
-            onClick={() => setSelectedUser(user)}
-            className={`p-3 mb-2 rounded cursor-pointer flex justify-between items-center ${
+            onClick={() => {
+              setSelectedUser(user);
+              setMessages([]);
+
+              // reset unread
+              setUnread((prev) => ({
+                ...prev,
+                [user._id]: 0,
+              }));
+            }}
+            className={`p-3 mb-2 rounded cursor-pointer ${
               selectedUser?._id === user._id
                 ? "bg-blue-500 text-white"
                 : "bg-gray-200 hover:bg-gray-300"
             }`}
           >
-            <span>{user.name}</span>
+            <div className="flex justify-between items-center">
+              <span>{user.name}</span>
 
-            {/* 🟢 ONLINE */}
-            {onlineUsers.includes(user._id) && (
-              <span className="text-green-500 text-lg">●</span>
+              {onlineUsers.includes(user._id) && (
+                <span className="text-green-500">●</span>
+              )}
+            </div>
+
+            {/* 💬 LAST MESSAGE */}
+            <div className="text-sm text-gray-500 truncate">
+              {lastMessages[user._id] || "No messages yet"}
+            </div>
+
+            {/* 🔴 UNREAD */}
+            {unread[user._id] > 0 && (
+              <span className="bg-red-500 text-white text-xs px-2 py-1 rounded-full">
+                {unread[user._id]}
+              </span>
             )}
           </div>
         ))}
@@ -148,7 +187,8 @@ export default function Chat() {
         {/* MESSAGES */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
           {messages.map((msg, i) => {
-            const isMe = msg.sender === currentUserId || msg.sender?._id === currentUserId;
+            const senderId = msg.sender?._id || msg.sender;
+            const isMe = senderId === currentUserId;
 
             return (
               <div
@@ -163,16 +203,29 @@ export default function Chat() {
                   }`}
                 >
                   {msg.text}
+
+                  {/* ✔✔ status */}
+                  {isMe && (
+                    <div className="text-xs mt-1 text-right">
+                      {msg.status === "seen"
+                        ? "✔✔"
+                        : msg.status === "delivered"
+                        ? "✔✔"
+                        : "✔"}
+                    </div>
+                  )}
                 </div>
               </div>
             );
           })}
 
-          {/* 💬 TYPING */}
+          {/* ⌨️ TYPING */}
           {typingUser === selectedUser?._id && (
-            <p className="text-sm text-gray-500 italic">
-              {selectedUser?.name} is typing...
-            </p>
+            <div className="flex space-x-1">
+              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span>
+              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150"></span>
+              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-300"></span>
+            </div>
           )}
 
           <div ref={messagesEndRef} />

@@ -9,19 +9,22 @@ const cors = require("cors");
 
 const app = express();
 
+// DB CONNECT
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB connected"))
   .catch(err => console.log(err));
 
+//  SERVER
 const server = http.createServer(app);
 
+//  SOCKET.IO
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: "*", // later restrict in production
   },
 });
 
-//  SOCKET AUTH
+//  SOCKET AUTH (JWT)
 io.use((socket, next) => {
   try {
     const token = socket.handshake.auth.token;
@@ -36,44 +39,61 @@ io.use((socket, next) => {
   }
 });
 
+// MIDDLEWARE
 app.use(cors());
 app.use(express.json());
 
+//  ROUTES
 app.use("/api/messages", require("./routes/messageRoutes"));
 app.use("/api/users", require("./routes/userRoutes"));
 app.use("/api/auth", require("./routes/authRoutes"));
+
+//  ONLINE USERS MAP
 const users = {}; // userId -> socketId
 
+// SOCKET EVENTS
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
-  if (socket.user?.id) {
-    users[socket.user.id] = socket.id;
+  const userId = socket.user?.id;
+
+  if (userId) {
+    users[userId] = socket.id;
   }
 
-  // SEND ONLINE USERS
+  //  SEND ONLINE USERS
   io.emit("onlineUsers", Object.keys(users));
 
+  // =========================
   //  SEND MESSAGE
+  // =========================
   socket.on("sendMessage", async (text, to) => {
     try {
-      if (!text || !to) return;
+      if (!text?.trim() || !to) return;
 
       const newMessage = new Message({
         text,
-        sender: socket.user.id,
+        sender: userId,
         receiver: to,
+        status: "sent",
       });
 
       let savedMessage = await newMessage.save();
+
+      // populate sender name
       savedMessage = await savedMessage.populate("sender", "name");
 
       const receiverSocketId = users[to];
 
+      //  DELIVERED
       if (receiverSocketId) {
+        savedMessage.status = "delivered";
+        await savedMessage.save();
+
         io.to(receiverSocketId).emit("receiveMessage", savedMessage);
       }
 
+      // send back to sender
       socket.emit("receiveMessage", savedMessage);
 
     } catch (error) {
@@ -81,29 +101,56 @@ io.on("connection", (socket) => {
     }
   });
 
+  // =========================
+  //  MARK AS SEEN
+  // =========================
+  socket.on("markSeen", async (fromUserId) => {
+    try {
+      await Message.updateMany(
+        {
+          sender: fromUserId,
+          receiver: userId,
+          status: { $ne: "seen" },
+        },
+        { status: "seen" }
+      );
+    } catch (err) {
+      console.log(err);
+    }
+  });
+
+  // =========================
   //  TYPING
+  // =========================
   socket.on("typing", (to) => {
     const receiverSocketId = users[to];
     if (receiverSocketId) {
-      io.to(receiverSocketId).emit("typing", socket.user.id);
+      io.to(receiverSocketId).emit("typing", userId);
     }
   });
 
   socket.on("stopTyping", (to) => {
     const receiverSocketId = users[to];
     if (receiverSocketId) {
-      io.to(receiverSocketId).emit("stopTyping", socket.user.id);
+      io.to(receiverSocketId).emit("stopTyping", userId);
     }
   });
 
+  // =========================
   //  DISCONNECT
+  // =========================
   socket.on("disconnect", () => {
-    delete users[socket.user?.id];
+    console.log("User disconnected:", socket.id);
+
+    if (userId) {
+      delete users[userId];
+    }
+
     io.emit("onlineUsers", Object.keys(users));
-    console.log("User disconnected");
   });
 });
 
+// START SERVER
 server.listen(5000, () =>
   console.log("Server running on port 5000")
 );
