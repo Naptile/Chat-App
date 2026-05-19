@@ -6,20 +6,35 @@ export default function Chat() {
   const [users, setUsers] = useState([]);
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
+  const [showUsers, setShowUsers] = useState(true);
+
   const [message, setMessage] = useState("");
+  const [image, setImage] = useState(null);
   const [messages, setMessages] = useState([]);
   const [typingUser, setTypingUser] = useState(null);
   const [unread, setUnread] = useState({});
   const [lastMessages, setLastMessages] = useState({});
 
   const messagesEndRef = useRef(null);
+  const audioRef = useRef(null);
+
   const token = localStorage.getItem("token");
 
   const currentUserId = token
     ? JSON.parse(atob(token.split(".")[1])).id
     : null;
 
-  // ✅ SOCKET CONNECTION
+  const formatTime = (date) => {
+    const d = new Date(date);
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  // 🔊 notification sound
+  useEffect(() => {
+    audioRef.current = new Audio("/notification.mp3");
+  }, []);
+
+  // SOCKET
   useEffect(() => {
     const newSocket = io(import.meta.env.VITE_API_URL, {
       auth: { token },
@@ -30,17 +45,20 @@ export default function Chat() {
     newSocket.on("receiveMessage", (msg) => {
       const senderId = msg.sender?._id || msg.sender;
 
-      // ✅ update last message
       setLastMessages((prev) => ({
         ...prev,
-        [senderId]: msg.text,
+        [senderId]: msg.text || "📷 Image",
       }));
 
-      // ✅ if chat open → show message
+      // 🔊 play sound if not current chat
+      if (!selectedUser || senderId !== selectedUser._id) {
+        audioRef.current?.play();
+      }
+
       if (selectedUser && senderId === selectedUser._id) {
         setMessages((prev) => [...prev, msg]);
+        newSocket.emit("markSeen", senderId);
       } else {
-        // 🔴 unread
         setUnread((prev) => ({
           ...prev,
           [senderId]: (prev[senderId] || 0) + 1,
@@ -48,67 +66,69 @@ export default function Chat() {
       }
     });
 
-    newSocket.on("onlineUsers", (users) => {
-      setOnlineUsers(users);
+    newSocket.on("messagesSeen", () => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.sender === currentUserId
+            ? { ...msg, status: "seen" }
+            : msg
+        )
+      );
     });
 
-    newSocket.on("typing", (userId) => {
-      setTypingUser(userId);
-    });
-
-    newSocket.on("stopTyping", () => {
-      setTypingUser(null);
-    });
+    newSocket.on("onlineUsers", setOnlineUsers);
+    newSocket.on("typing", setTypingUser);
+    newSocket.on("stopTyping", () => setTypingUser(null));
 
     return () => newSocket.disconnect();
   }, [selectedUser]);
 
-  // ✅ FETCH USERS
+  // USERS
   useEffect(() => {
     fetch(`${import.meta.env.VITE_API_URL}/api/users`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) setUsers(data);
-        else setUsers([]);
-      });
+      .then((data) => Array.isArray(data) && setUsers(data));
   }, []);
 
-  // ✅ LOAD CHAT HISTORY
+  // LOAD CHAT
   useEffect(() => {
     if (!selectedUser) return;
 
     fetch(`${import.meta.env.VITE_API_URL}/api/messages/${selectedUser._id}`, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) setMessages(data);
-        else setMessages([]);
-      });
+      .then(setMessages);
+
+    socket?.emit("markSeen", selectedUser._id);
+
+    setUnread((prev) => ({
+      ...prev,
+      [selectedUser._id]: 0,
+    }));
   }, [selectedUser]);
 
-  // ✅ AUTO SCROLL
+  // AUTO SCROLL
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // ✅ SEND MESSAGE
+  // SEND MESSAGE
   const sendMessage = () => {
-    if (!message.trim() || !selectedUser) return;
+    if ((!message.trim() && !image) || !selectedUser) return;
 
-    socket.emit("sendMessage", message, selectedUser._id);
-    socket.emit("stopTyping", selectedUser._id);
+    socket.emit("sendMessage", {
+      text: message,
+      image,
+      to: selectedUser._id,
+    });
 
     setMessage("");
+    setImage(null);
   };
 
-  // ✅ TYPING
   const handleTyping = (e) => {
     setMessage(e.target.value);
 
@@ -121,48 +141,62 @@ export default function Chat() {
     }, 1000);
   };
 
+
+
+  const handleImageUpload = async (file) => {
+  const formData = new FormData();
+  formData.append("image", file);
+
+  const res = await fetch(
+    `${import.meta.env.VITE_API_URL}/api/upload`,
+    {
+      method: "POST",
+      body: formData,
+    }
+  );
+
+  const data = await res.json();
+  setImage(data.imageUrl);
+};
+
+
   return (
-    <div className="flex h-screen bg-gray-100">
+    <div className="flex h-screen bg-[#111b21] text-white">
 
       {/* USERS */}
-      <div className="w-1/4 bg-white border-r p-4">
-        <h2 className="text-xl font-bold mb-4">Users</h2>
+      <div className={`${showUsers ? "block" : "hidden"} md:block w-full md:w-1/4 bg-[#202c33]`}>
+        <h2 className="p-4 font-bold text-lg">Chats</h2>
 
         {users.map((user) => (
           <div
             key={user._id}
             onClick={() => {
               setSelectedUser(user);
-              setMessages([]);
-
-              // reset unread
-              setUnread((prev) => ({
-                ...prev,
-                [user._id]: 0,
-              }));
+              setShowUsers(false);
             }}
-            className={`p-3 mb-2 rounded cursor-pointer ${
-              selectedUser?._id === user._id
-                ? "bg-blue-500 text-white"
-                : "bg-gray-200 hover:bg-gray-300"
-            }`}
+            className="flex items-center gap-3 p-3 hover:bg-[#2a3942] cursor-pointer"
           >
-            <div className="flex justify-between items-center">
-              <span>{user.name}</span>
+            {/* Avatar */}
+            <img
+              src={user.avatar || "https://i.pravatar.cc/40"}
+              className="w-10 h-10 rounded-full"
+            />
 
-              {onlineUsers.includes(user._id) && (
-                <span className="text-green-500">●</span>
-              )}
+            <div className="flex-1">
+              <div className="flex justify-between">
+                <span>{user.name}</span>
+                {onlineUsers.includes(user._id) && (
+                  <span className="text-green-400 text-xs">●</span>
+                )}
+              </div>
+
+              <div className="text-sm text-gray-400 truncate">
+                {lastMessages[user._id] || "No messages"}
+              </div>
             </div>
 
-            {/* 💬 LAST MESSAGE */}
-            <div className="text-sm text-gray-500 truncate">
-              {lastMessages[user._id] || "No messages yet"}
-            </div>
-
-            {/* 🔴 UNREAD */}
             {unread[user._id] > 0 && (
-              <span className="bg-red-500 text-white text-xs px-2 py-1 rounded-full">
+              <span className="bg-green-500 text-xs px-2 py-1 rounded-full">
                 {unread[user._id]}
               </span>
             )}
@@ -171,61 +205,59 @@ export default function Chat() {
       </div>
 
       {/* CHAT */}
-      <div className="flex-1 flex flex-col">
+      <div className={`${!showUsers ? "flex" : "hidden"} md:flex flex-1 flex-col`}>
 
         {/* HEADER */}
-        <div className="p-4 bg-white border-b font-bold flex justify-between">
-          <span>
-            {selectedUser ? selectedUser.name : "Select a user"}
-          </span>
+        <div className="bg-[#202c33] p-3 flex items-center gap-3">
+          <button onClick={() => setShowUsers(true)} className="md:hidden">←</button>
 
-          {selectedUser && onlineUsers.includes(selectedUser._id) && (
-            <span className="text-green-500 text-sm">Online</span>
-          )}
+          <img
+            src={selectedUser?.avatar || "https://i.pravatar.cc/40"}
+            className="w-10 h-10 rounded-full"
+          />
+
+          <div>
+            <div>{selectedUser?.name}</div>
+            {onlineUsers.includes(selectedUser?._id) && (
+              <div className="text-xs text-gray-400">online</div>
+            )}
+          </div>
         </div>
 
         {/* MESSAGES */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto p-4 bg-[#0b141a]">
           {messages.map((msg, i) => {
             const senderId = msg.sender?._id || msg.sender;
             const isMe = senderId === currentUserId;
 
             return (
-              <div
-                key={i}
-                className={`flex ${isMe ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`p-3 rounded-lg max-w-xs ${
-                    isMe
-                      ? "bg-green-500 text-white rounded-br-none"
-                      : "bg-white border rounded-bl-none"
-                  }`}
-                >
-                  {msg.text}
+              <div key={i} className={`flex ${isMe ? "justify-end" : "justify-start"} mb-2`}>
+                <div className={`max-w-xs p-2 rounded-lg ${
+                  isMe ? "bg-green-500" : "bg-[#202c33]"
+                }`}>
+                  
+                  {msg.text && <div>{msg.text}</div>}
 
-                  {/* ✔✔ status */}
-                  {isMe && (
-                    <div className="text-xs mt-1 text-right">
-                      {msg.status === "seen"
-                        ? "✔✔"
-                        : msg.status === "delivered"
-                        ? "✔✔"
-                        : "✔"}
-                    </div>
+                  {msg.image && (
+                    <img src={msg.image} className="rounded mt-1" />
                   )}
+
+                  <div className="text-[10px] text-right opacity-70">
+                    {formatTime(msg.createdAt)}
+
+                    {isMe && (
+                      <span className="ml-1">
+                        {msg.status === "seen" ? "✔✔" : "✔"}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             );
           })}
 
-          {/* ⌨️ TYPING */}
           {typingUser === selectedUser?._id && (
-            <div className="flex space-x-1">
-              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span>
-              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150"></span>
-              <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-300"></span>
-            </div>
+            <div className="text-gray-400 text-sm">typing...</div>
           )}
 
           <div ref={messagesEndRef} />
@@ -233,18 +265,22 @@ export default function Chat() {
 
         {/* INPUT */}
         {selectedUser && (
-          <div className="p-4 bg-white border-t flex gap-2">
+          <div className="p-3 bg-[#202c33] flex gap-2">
+            <input
+              type="file"
+               
+            onChange={(e) => handleImageUpload(e.target.files[0])}
+            />
+
             <input
               value={message}
               onChange={handleTyping}
-              placeholder="Type a message..."
-              className="flex-1 px-4 py-2 border rounded-lg focus:outline-none"
+              placeholder="Message"
+              className="flex-1 px-4 py-2 rounded-full bg-[#2a3942]"
             />
-            <button
-              onClick={sendMessage}
-              className="bg-blue-600 text-white px-6 rounded-lg hover:bg-blue-700"
-            >
-              Send
+
+            <button onClick={sendMessage} className="bg-green-500 px-4 rounded-full">
+              ➤
             </button>
           </div>
         )}

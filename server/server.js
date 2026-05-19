@@ -9,22 +9,31 @@ const cors = require("cors");
 
 const app = express();
 
+// =========================
 // DB CONNECT
+// =========================
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB connected"))
   .catch(err => console.log(err));
 
-//  SERVER
+// =========================
+// SERVER
+// =========================
 const server = http.createServer(app);
 
-//  SOCKET.IO
+// =========================
+// SOCKET.IO
+// =========================
 const io = new Server(server, {
   cors: {
-    origin: "*", // later restrict in production
+    origin: "*",
+    methods: ["GET", "POST"],
   },
 });
 
-//  SOCKET AUTH (JWT)
+// =========================
+// SOCKET AUTH (JWT)
+// =========================
 io.use((socket, next) => {
   try {
     const token = socket.handshake.auth.token;
@@ -39,70 +48,80 @@ io.use((socket, next) => {
   }
 });
 
+// =========================
 // MIDDLEWARE
+// =========================
 app.use(cors());
 app.use(express.json());
 
-//  ROUTES
+// =========================
+// ROUTES
+// =========================
 app.use("/api/messages", require("./routes/messageRoutes"));
 app.use("/api/users", require("./routes/userRoutes"));
 app.use("/api/auth", require("./routes/authRoutes"));
+app.use("/api/upload", require("./routes/uploadRoutes"));
 
-//  ONLINE USERS MAP
+// =========================
+// ONLINE USERS MAP
+// =========================
 const users = {}; // userId -> socketId
 
+// =========================
 // SOCKET EVENTS
+// =========================
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
   const userId = socket.user?.id;
 
+  // store user
   if (userId) {
     users[userId] = socket.id;
   }
 
-  //  SEND ONLINE USERS
+  // send online users
   io.emit("onlineUsers", Object.keys(users));
 
   // =========================
-  //  SEND MESSAGE
+  // SEND MESSAGE
   // =========================
-  socket.on("sendMessage", async (text, to) => {
-    try {
-      if (!text?.trim() || !to) return;
+  socket.on("sendMessage", async (data) => {
+  try {
+    const { text, image, to } = data;
 
-      const newMessage = new Message({
-        text,
-        sender: userId,
-        receiver: to,
-        status: "sent",
-      });
+    if (!to || (!text && !image)) return;
 
-      let savedMessage = await newMessage.save();
+    const newMessage = new Message({
+      text,
+      image,
+      sender: userId,
+      receiver: to,
+      status: "sent",
+    });
 
-      // populate sender name
-      savedMessage = await savedMessage.populate("sender", "name");
+    let savedMessage = await newMessage.save();
 
-      const receiverSocketId = users[to];
+    savedMessage = await savedMessage.populate("sender", "name avatar");
 
-      //  DELIVERED
-      if (receiverSocketId) {
-        savedMessage.status = "delivered";
-        await savedMessage.save();
+    const receiverSocketId = users[to];
 
-        io.to(receiverSocketId).emit("receiveMessage", savedMessage);
-      }
+    if (receiverSocketId) {
+      savedMessage.status = "delivered";
+      await savedMessage.save();
 
-      // send back to sender
-      socket.emit("receiveMessage", savedMessage);
-
-    } catch (error) {
-      console.log(error);
+      io.to(receiverSocketId).emit("receiveMessage", savedMessage);
     }
-  });
+
+    socket.emit("receiveMessage", savedMessage);
+
+  } catch (err) {
+    console.log(err);
+  }
+});
 
   // =========================
-  //  MARK AS SEEN
+  // MARK AS SEEN (REAL-TIME)
   // =========================
   socket.on("markSeen", async (fromUserId) => {
     try {
@@ -114,13 +133,23 @@ io.on("connection", (socket) => {
         },
         { status: "seen" }
       );
+
+      const senderSocketId = users[fromUserId];
+
+      //  notify sender instantly
+      if (senderSocketId) {
+        io.to(senderSocketId).emit("messagesSeen", {
+          from: userId,
+        });
+      }
+
     } catch (err) {
       console.log(err);
     }
   });
 
   // =========================
-  //  TYPING
+  // TYPING
   // =========================
   socket.on("typing", (to) => {
     const receiverSocketId = users[to];
@@ -137,7 +166,7 @@ io.on("connection", (socket) => {
   });
 
   // =========================
-  //  DISCONNECT
+  // DISCONNECT
   // =========================
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
@@ -150,7 +179,9 @@ io.on("connection", (socket) => {
   });
 });
 
+// =========================
 // START SERVER
+// =========================
 server.listen(5000, () =>
   console.log("Server running on port 5000")
 );
