@@ -9,6 +9,10 @@ A full-stack real-time chat application built with the MERN stack, featuring:
 - 🔔 Notification sounds
 - 📱 Fully responsive WhatsApp-style UI
 
+
+## 🚀 Project Overview
+live url https://chat-app-lyart-nine-76.vercel.app/
+
 ---
 
 ## 🚀 Tech Stack
@@ -154,9 +158,9 @@ npm run dev
 
 ## 📸 Screenshots
 
-![Chat UI](screenshots/image.png)
-![Image Messages](screenshots/image.png)
-![Mobile Responsive](screenshots/mobile-layout.png)
+![Chat UI](/client/src/assets/img2.png)
+![Image Messages](/client/src/assets/image.png)
+![Mobile Responsive](/client/src/assets/img1.png)
 
 ---
 
