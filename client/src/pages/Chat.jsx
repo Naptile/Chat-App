@@ -48,6 +48,11 @@ export default function Chat() {
 
     setSocket(newSocket);
 
+    const newSocket = io(import.meta.env.VITE_API_URL, {
+    auth: { token },
+    transports: ["websocket"], //  for production
+  });
+
     newSocket.on("receiveMessage", (msg) => {
       const senderId = msg.sender?._id || msg.sender;
 
