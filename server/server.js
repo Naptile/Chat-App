@@ -26,7 +26,7 @@ const server = http.createServer(app);
 // =========================
 const io = new Server(server, {
   cors: {
-    origin: "https://chat-app-lyart-nine-76.vercel.app/",
+    origin: "https://chat-app-lyart-nine-76.vercel.app/login",
     methods: ["GET", "POST"],
   },
 });
