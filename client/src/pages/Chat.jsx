@@ -10,6 +10,9 @@ export default function Chat() {
 
   const [message, setMessage] = useState("");
   const [image, setImage] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
   const [messages, setMessages] = useState([]);
   const [typingUser, setTypingUser] = useState(null);
   const [unread, setUnread] = useState({});
@@ -26,12 +29,15 @@ export default function Chat() {
 
   const formatTime = (date) => {
     const d = new Date(date);
-    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   };
 
-  // 🔊 notification sound
+  //  notification sound
   useEffect(() => {
-    audioRef.current = new Audio("/notification.mp3");
+    audioRef.current = new Audio("https://splice.com/sounds/sample/13cfdf7b8023430aa2cb26cf58eb520bfd8f96c13de8707fc30a85983f6f1a3a");
   }, []);
 
   // SOCKET
@@ -47,12 +53,12 @@ export default function Chat() {
 
       setLastMessages((prev) => ({
         ...prev,
-        [senderId]: msg.text || "📷 Image",
+        [senderId]: msg.text || " Image",
       }));
 
-      // 🔊 play sound if not current chat
+      //  sound safely
       if (!selectedUser || senderId !== selectedUser._id) {
-        audioRef.current?.play();
+        audioRef.current?.play().catch(() => {});
       }
 
       if (selectedUser && senderId === selectedUser._id) {
@@ -117,7 +123,7 @@ export default function Chat() {
 
   // SEND MESSAGE
   const sendMessage = () => {
-    if ((!message.trim() && !image) || !selectedUser) return;
+    if ((!message.trim() && !image) || !selectedUser || uploading) return;
 
     socket.emit("sendMessage", {
       text: message,
@@ -127,8 +133,10 @@ export default function Chat() {
 
     setMessage("");
     setImage(null);
+    setPreview(null);
   };
 
+  // TYPING
   const handleTyping = (e) => {
     setMessage(e.target.value);
 
@@ -141,24 +149,33 @@ export default function Chat() {
     }, 1000);
   };
 
-
-
+  //  IMAGE UPLOAD (WITH PREVIEW)
   const handleImageUpload = async (file) => {
-  const formData = new FormData();
-  formData.append("image", file);
+    if (!file) return;
 
-  const res = await fetch(
-    `${import.meta.env.VITE_API_URL}/api/upload`,
-    {
-      method: "POST",
-      body: formData,
+    setPreview(URL.createObjectURL(file));
+    setUploading(true);
+
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+
+      const res = await fetch(
+        `${import.meta.env.VITE_API_URL}/api/upload`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
+
+      const data = await res.json();
+      setImage(data.imageUrl);
+    } catch (err) {
+      console.log(err);
+    } finally {
+      setUploading(false);
     }
-  );
-
-  const data = await res.json();
-  setImage(data.imageUrl);
-};
-
+  };
 
   return (
     <div className="flex h-screen bg-[#111b21] text-white">
@@ -176,7 +193,6 @@ export default function Chat() {
             }}
             className="flex items-center gap-3 p-3 hover:bg-[#2a3942] cursor-pointer"
           >
-            {/* Avatar */}
             <img
               src={user.avatar || "https://i.pravatar.cc/40"}
               className="w-10 h-10 rounded-full"
@@ -226,6 +242,7 @@ export default function Chat() {
 
         {/* MESSAGES */}
         <div className="flex-1 overflow-y-auto p-4 bg-[#0b141a]">
+
           {messages.map((msg, i) => {
             const senderId = msg.sender?._id || msg.sender;
             const isMe = senderId === currentUserId;
@@ -235,7 +252,6 @@ export default function Chat() {
                 <div className={`max-w-xs p-2 rounded-lg ${
                   isMe ? "bg-green-500" : "bg-[#202c33]"
                 }`}>
-                  
                   {msg.text && <div>{msg.text}</div>}
 
                   {msg.image && (
@@ -246,8 +262,10 @@ export default function Chat() {
                     {formatTime(msg.createdAt)}
 
                     {isMe && (
-                      <span className="ml-1">
-                        {msg.status === "seen" ? "✔✔" : "✔"}
+                      <span className={`ml-1 ${
+                        msg.status === "seen" ? "text-blue-300" : ""
+                      }`}>
+                        ✔✔
                       </span>
                     )}
                   </div>
@@ -263,14 +281,29 @@ export default function Chat() {
           <div ref={messagesEndRef} />
         </div>
 
+        {/* PREVIEW */}
+        {preview && (
+          <div className="p-2 bg-[#202c33]">
+            <img src={preview} className="w-32 rounded-lg" />
+            {uploading && (
+              <p className="text-xs text-gray-400">Uploading...</p>
+            )}
+          </div>
+        )}
+
         {/* INPUT */}
         {selectedUser && (
-          <div className="p-3 bg-[#202c33] flex gap-2">
-            <input
-              type="file"
-               
-            onChange={(e) => handleImageUpload(e.target.files[0])}
-            />
+          <div className="p-3 bg-[#202c33] flex gap-2 items-center">
+
+            {/* 📎 upload */}
+            <label className="cursor-pointer">
+              📎
+              <input
+                type="file"
+                hidden
+                onChange={(e) => handleImageUpload(e.target.files[0])}
+              />
+            </label>
 
             <input
               value={message}
@@ -279,7 +312,11 @@ export default function Chat() {
               className="flex-1 px-4 py-2 rounded-full bg-[#2a3942]"
             />
 
-            <button onClick={sendMessage} className="bg-green-500 px-4 rounded-full">
+            <button
+              disabled={uploading}
+              onClick={sendMessage}
+              className="bg-green-500 px-4 py-2 rounded-full disabled:opacity-50"
+            >
               ➤
             </button>
           </div>
