@@ -15,6 +15,15 @@ live url https://chat-app-lyart-nine-76.vercel.app/
 
 ---
 
+
+## 📸 Screenshots
+
+![Chat UI](/client/src/assets/img2.png)
+![Image Messages](/client/src/assets/image.png)
+![Mobile Responsive](/client/src/assets/img1.png)
+
+---
+
 ## 🚀 Tech Stack
 
 ### Frontend
@@ -156,13 +165,6 @@ npm run dev
 
 ---
 
-## 📸 Screenshots
-
-![Chat UI](/client/src/assets/img2.png)
-![Image Messages](/client/src/assets/image.png)
-![Mobile Responsive](/client/src/assets/img1.png)
-
----
 
 ## 🧠 Learning Highlights
 
